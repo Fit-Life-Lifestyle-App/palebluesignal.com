@@ -45,14 +45,37 @@
     try { localStorage.setItem(key, new Date().toISOString().replace(/\.\d+Z$/, "Z")); } catch (err) { /* private mode */ }
   }
 
-  // Embedded X posts: match the reader's light or dark mode, then load X's script.
+  // Embedded X posts follow the page's theme: a data-theme on <html> if one is set, otherwise
+  // the phone's or computer's light/dark setting. If that setting changes while the post is
+  // open, the posts are drawn again in the new theme.
+  var darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
+  function theme() {
+    var forced = doc.documentElement.getAttribute("data-theme");
+    if (forced === "dark" || forced === "light") return forced;
+    return darkQuery && darkQuery.matches ? "dark" : "light";
+  }
   if (post && post.getAttribute("data-x")) {
-    if (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) {
-      Array.prototype.forEach.call(doc.querySelectorAll("blockquote.twitter-tweet"), function (b) { b.setAttribute("data-theme", "dark"); });
-    }
+    var xposts = Array.prototype.slice.call(doc.querySelectorAll("figure.xpost"));
+    var originals = xposts.map(function (f) { return f.innerHTML; });
+    var themeX = function () {
+      var t = theme();
+      xposts.forEach(function (f) {
+        Array.prototype.forEach.call(f.querySelectorAll("blockquote.twitter-tweet"), function (b) { b.setAttribute("data-theme", t); });
+      });
+    };
+    themeX();
     var s = doc.createElement("script");
     s.async = true; s.charset = "utf-8"; s.src = "https://platform.twitter.com/widgets.js";
     doc.body.appendChild(s);
+    var redraw = function () {
+      xposts.forEach(function (f, i) { f.innerHTML = originals[i]; });
+      themeX();
+      if (window.twttr && twttr.widgets && twttr.widgets.load) twttr.widgets.load(post);
+    };
+    if (darkQuery) {
+      if (darkQuery.addEventListener) darkQuery.addEventListener("change", redraw);
+      else if (darkQuery.addListener) darkQuery.addListener(redraw);
+    }
   }
 
   var box = doc.querySelector(".listen");
@@ -101,7 +124,8 @@
       });
       if ("mediaSession" in navigator && window.MediaMetadata) {
         audio.addEventListener("play", function () {
-          try { navigator.mediaSession.metadata = new MediaMetadata({ title: title, artist: (doc.querySelector(".brand span") || {}).textContent || "" }); } catch (err) { /* older browsers */ }
+          var site = doc.querySelector('meta[property="og:site_name"]');
+          try { navigator.mediaSession.metadata = new MediaMetadata({ title: title, artist: site ? site.getAttribute("content") : "" }); } catch (err) { /* older browsers */ }
         }, { once: true });
       }
       box.hidden = false;
